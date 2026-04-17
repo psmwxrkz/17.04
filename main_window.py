@@ -159,7 +159,7 @@ class SistemaCadastrosApp:
         self.sync_em_andamento = False
         self.preload_realizados_em_andamento = False
         self.preload_realizados_concluido = False
-        self.intervalo_polling_ms = 5000
+        self.intervalo_polling_ms = 10000
         self.ultima_ficha_alerta = None
         self.lembrete_popup_after_id = None
         self.intervalo_lembrete_popup_ms = 36500
@@ -670,6 +670,7 @@ class SistemaCadastrosApp:
 
         self._snapshot_listas = snapshot_atual
 
+        # guarda seleção atual para restaurar depois
         cadastro_selecionado_id = None
         cadastro_selecionado_origem = None
         origem_lista_selecionada = None
@@ -679,6 +680,21 @@ class SistemaCadastrosApp:
             cadastro_selecionado_origem = self.cadastro_em_exibicao.get("origem")
             origem_lista_selecionada = self.origem_em_exibicao
 
+        # cancela qualquer render em lotes anterior ainda pendente
+        if not hasattr(self, "_render_after_ids"):
+            self._render_after_ids = []
+
+        for after_id in self._render_after_ids:
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+        self._render_after_ids = []
+
+        # gera um token novo para invalidar renders antigos
+        self._render_token = getattr(self, "_render_token", 0) + 1
+        render_token = self._render_token
+
         for widget in self.lista_pendentes.winfo_children():
             widget.destroy()
 
@@ -687,36 +703,121 @@ class SistemaCadastrosApp:
 
         self.card_selecionado = None
 
-        if not self.pendentes_filtrados:
-            tk.Label(
-                self.lista_pendentes,
-                text="Nenhum cadastro pendente encontrado.",
-                bg=CORES["bg_card"],
-                fg=CORES["texto_secundario"],
-                font=("Segoe UI", 10),
-                pady=10,
-            ).pack(fill="x")
+        self._renderizar_cards_em_lotes(
+            parent=self.lista_pendentes,
+            itens=self.pendentes_filtrados,
+            origem="pendente",
+            render_token=render_token,
+            on_finish=lambda: self._renderizar_cards_em_lotes(
+                parent=self.lista_realizados,
+                itens=self.realizados_filtrados,
+                origem="realizado",
+                render_token=render_token,
+                on_finish=lambda: self._finalizar_render_listas(
+                    render_token,
+                    cadastro_selecionado_id,
+                    cadastro_selecionado_origem,
+                    origem_lista_selecionada,
+                ),
+            ),
+        )
+
+
+    def _agendar_render(self, delay_ms, callback):
+        after_id = self.root.after(delay_ms, callback)
+        if not hasattr(self, "_render_after_ids"):
+            self._render_after_ids = []
+        self._render_after_ids.append(after_id)
+        return after_id
+
+
+    def _renderizar_cards_em_lotes(
+        self,
+        parent,
+        itens,
+        origem,
+        render_token,
+        on_finish=None,
+        indice=0,
+        lote=12,
+    ):
+        # se já existe um render mais novo, aborta este
+        if render_token != getattr(self, "_render_token", 0):
+            return
+
+        fim = min(indice + lote, len(itens))
+
+        if indice == 0 and not itens:
+            texto = (
+                "Nenhum cadastro pendente encontrado."
+                if origem == "pendente"
+                else "Nenhum cadastro realizado encontrado."
+            )
+
+            try:
+                tk.Label(
+                    parent,
+                    text=texto,
+                    bg=CORES["bg_card"],
+                    fg=CORES["texto_secundario"],
+                    font=("Segoe UI", 10),
+                    pady=10,
+                ).pack(fill="x")
+            except Exception:
+                return
+
+            if on_finish:
+                self._agendar_render(1, on_finish)
+            return
+
+        for cadastro in itens[indice:fim]:
+            if render_token != getattr(self, "_render_token", 0):
+                return
+            self.criar_card_ficha(parent, cadastro, origem=origem)
+
+        if fim < len(itens):
+            self._agendar_render(
+                1,
+                lambda: self._renderizar_cards_em_lotes(
+                    parent=parent,
+                    itens=itens,
+                    origem=origem,
+                    render_token=render_token,
+                    on_finish=on_finish,
+                    indice=fim,
+                    lote=lote,
+                ),
+            )
         else:
-            for cadastro in self.pendentes_filtrados:
-                self.criar_card_ficha(self.lista_pendentes, cadastro, origem="pendente")
- 
-        if not self.realizados_filtrados:
-            tk.Label(
-                self.lista_realizados,
-                text="Nenhum cadastro realizado encontrado.",
-                bg=CORES["bg_card"],
-                fg=CORES["texto_secundario"],
-                font=("Segoe UI", 10),
-                pady=10,
-            ).pack(fill="x")
-        else:
-            for cadastro in self.realizados_filtrados:
-                self.criar_card_ficha(self.lista_realizados, cadastro, origem="realizado")
+            if on_finish:
+                self._agendar_render(1, on_finish)
+
+
+    def _finalizar_render_listas(
+        self,
+        render_token,
+        cadastro_selecionado_id=None,
+        cadastro_selecionado_origem=None,
+        origem_lista_selecionada=None,
+    ):
+        # se já existe um render mais novo, ignora
+        if render_token != getattr(self, "_render_token", 0):
+            return
+
+        # limpa lista de afters concluídos
+        self._render_after_ids = []
 
         self.atualizar_status_alerta()
+        self._ao_configurar_lista_canvas(self.canvas_pendentes, self.canvas_window_pendentes)
+        self._ao_configurar_lista_canvas(self.canvas_realizados, self.canvas_window_realizados)
 
+        # restaura seleção, se ainda existir
         if cadastro_selecionado_id and origem_lista_selecionada:
-            lista_origem = self.pendentes_filtrados if origem_lista_selecionada == "pendente" else self.realizados_filtrados
+            lista_origem = (
+                self.pendentes_filtrados
+                if origem_lista_selecionada == "pendente"
+                else self.realizados_filtrados
+            )
 
             for cadastro in lista_origem:
                 if (
@@ -727,10 +828,7 @@ class SistemaCadastrosApp:
                     self.origem_em_exibicao = origem_lista_selecionada
                     self.exibir_detalhes(cadastro, origem_lista_selecionada)
                     break
-
-        self._ao_configurar_lista_canvas(self.canvas_pendentes, self.canvas_window_pendentes)
-        self._ao_configurar_lista_canvas(self.canvas_realizados, self.canvas_window_realizados)
-
+    
     def sincronizar_com_firebase(self, exibir_alertas=False, visitantes=None):
         try:
             ids_anteriores = set(self.ids_pendentes_atuais)
