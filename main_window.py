@@ -696,9 +696,9 @@ class SistemaCadastrosApp:
                 pady=10,
             ).pack(fill="x")
         else:
-            for cadastro in reversed(self.pendentes_filtrados):
+            for cadastro in self.pendentes_filtrados:
                 self.criar_card_ficha(self.lista_pendentes, cadastro, origem="pendente")
-
+ 
         if not self.realizados_filtrados:
             tk.Label(
                 self.lista_realizados,
@@ -1938,7 +1938,11 @@ class SistemaCadastrosApp:
             0,
             destaque=True,
             botao_copiar=True,
-            callback_copiar=lambda: copiar_texto(self.root, cadastro.get("placa", ""), "Placa"),
+            callback_copiar=lambda: copiar_texto(
+                self.root,
+                cadastro.get("placa", ""),
+                "Placa",
+            ),
         )
 
         self.criar_campo_formulario(
@@ -1947,8 +1951,8 @@ class SistemaCadastrosApp:
             cadastro.get("empresa_motorista", "N/A"),
             0,
             1,
-            botao_copiar=True,
             destaque=True,
+            botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
                 cadastro.get("empresa_motorista", ""),
@@ -1963,7 +1967,11 @@ class SistemaCadastrosApp:
             1,
             0,
             botao_copiar=True,
-            callback_copiar=lambda: copiar_texto(self.root, cadastro.get("motorista_cnh", ""), "CNH"),
+            callback_copiar=lambda: copiar_texto(
+                self.root,
+                cadastro.get("motorista_cnh", ""),
+                "CNH",
+            ),
         )
 
         self.criar_campo_formulario(
@@ -1972,9 +1980,13 @@ class SistemaCadastrosApp:
             nota_fiscal,
             1,
             1,
-            botao_copiar=nota_fiscal != "N/A",
-            callback_copiar=lambda: copiar_texto(self.root, nota_fiscal, "Nota fiscal"),
             destaque=True,
+            botao_copiar=nota_fiscal != "N/A",
+            callback_copiar=lambda: copiar_texto(
+                self.root,
+                nota_fiscal,
+                "Nota fiscal",
+            ),
         )
 
         card_motorista = tk.Frame(
@@ -2069,6 +2081,7 @@ class SistemaCadastrosApp:
             4,
             0,
             botao_copiar=True,
+            destaque=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
                 limpar_documento(cadastro.get("motorista_cpf", "")),
@@ -2076,24 +2089,100 @@ class SistemaCadastrosApp:
             ),
         )
 
-        self.criar_campo_formulario(
-            grade_dados,
-            "Data de conclusão",
-            formatar_data_br(concluido_em),
-            4,
-            1,
-        )
+        if origem == "realizado":
+            self.criar_campo_formulario(
+                grade_dados,
+                "Data de conclusão",
+                formatar_data_br(concluido_em),
+                4,
+                1,
+            )
+        else:
+            self.criar_campo_formulario(
+                grade_dados,
+                "SmartCard atual",
+                cadastro.get("smartcard", "Não informado") or "Não informado",
+                4,
+                1,
+                destaque=True,
+                botao_copiar=True,
+                callback_copiar=lambda: copiar_texto(
+                    self.root,
+                    cadastro.get("smartcard", "Não informado") or "Não informado",
+                    "SmartCard atual",
+                ),
+            )
+            
+        linha_extra = 5
 
-        self.criar_campo_formulario(
-            grade_dados,
-            "Recebido no site",
-            formatar_data_br(cadastro.get("datahora_evento", "") or cadastro.get("data", "")),
-            5,
-            0,
-        )
+        if cadastro.get("origem") == "visitantes":
+            self.criar_campo_formulario(
+                grade_dados,
+                "Empresa Solicitante",
+                cadastro.get("empresa_solicitante", "N/A"),
+                linha_extra,
+                0,
+                columnspan=2,
+                destaque=True,
+                botao_copiar=True,
+                callback_copiar=lambda: copiar_texto(
+                    self.root,
+                    cadastro.get("empresa_solicitante", ""),
+                    "Empresa Solicitante",
+                ),
+            )
+            linha_extra += 1
+
+        if cadastro.get("origem") == "consumos":
+            self.criar_campo_formulario(
+                grade_dados,
+                "Empresa Solicitante",
+                "CONSUMO DE BORDO",
+                linha_extra,
+                0,
+                columnspan=2,
+                destaque=True,
+                botao_copiar=True,
+                callback_copiar=lambda: copiar_texto(
+                    self.root,
+                    "CONSUMO DE BORDO",
+                    "Empresa Solicitante",
+                ),
+            )
+            linha_extra += 1
+
+            self.criar_campo_formulario(
+                grade_dados,
+                "Navio",
+                cadastro.get("navio", "N/A"),
+                linha_extra,
+                0,
+                botao_copiar=True,
+                callback_copiar=lambda: copiar_texto(
+                    self.root,
+                    cadastro.get("navio", ""),
+                    "Navio",
+                ),
+            )
+
+            produto_terminal = f"{cadastro.get('produto', 'N/A')} | {cadastro.get('terminal', 'N/A')}"
+            self.criar_campo_formulario(
+                grade_dados,
+                "Produto / Terminal",
+                produto_terminal,
+                linha_extra,
+                1,
+                botao_copiar=True,
+                callback_copiar=lambda: copiar_texto(
+                    self.root,
+                    produto_terminal,
+                    "Produto / Terminal",
+                ),
+            )
+            linha_extra += 1
 
         card_digitacao = tk.Frame(
-            grade_dados,
+            self.conteudo_central,
             bg=CORES["card_info"],
             bd=1,
             relief="solid",
@@ -2102,16 +2191,15 @@ class SistemaCadastrosApp:
             padx=8,
             pady=6,
         )
-        card_digitacao.grid(row=5, column=1, sticky="nsew", padx=4, pady=4)
+        card_digitacao.pack(fill="x", pady=(8, 4))
 
         tk.Label(
             card_digitacao,
-            text="SmartCard",
+            text="SmartCard para cadastro",
             bg=CORES["card_info"],
             fg=CORES["texto_secundario"],
             font=("Segoe UI", 7, "bold"),
             anchor="w",
-            destaque=True,
         ).pack(anchor="w")
 
         linha_smartcard = tk.Frame(card_digitacao, bg=CORES["card_info"])
@@ -2155,56 +2243,6 @@ class SistemaCadastrosApp:
             cursor="hand2",
         ).pack(side="left", padx=(6, 0))
 
-        linha_extra = 6
-
-        if cadastro.get("origem") == "visitantes":
-            self.criar_campo_formulario(
-                grade_dados,
-                "Empresa Solicitante",
-                cadastro.get("empresa_solicitante", "N/A"),
-                linha_extra,
-                0,
-                columnspan=2,
-                botao_copiar=True,
-                callback_copiar=lambda: copiar_texto(
-                    self.root,
-                    cadastro.get("empresa_solicitante", ""),
-                    "Empresa Solicitante",
-                ),
-            )
-            linha_extra += 1
-
-        if cadastro.get("origem") == "consumos":
-            self.criar_campo_formulario(
-                grade_dados,
-                "Navio",
-                cadastro.get("navio", "N/A"),
-                linha_extra,
-                0,
-                botao_copiar=True,
-                callback_copiar=lambda: copiar_texto(
-                    self.root,
-                    cadastro.get("navio", ""),
-                    "Navio",
-                ),
-            )
-
-            produto_terminal = f"{cadastro.get('produto', 'N/A')} | {cadastro.get('terminal', 'N/A')}"
-            self.criar_campo_formulario(
-                grade_dados,
-                "Produto / Terminal",
-                produto_terminal,
-                linha_extra,
-                1,
-                botao_copiar=True,
-                callback_copiar=lambda: copiar_texto(
-                    self.root,
-                    produto_terminal,
-                    "Produto / Terminal",
-                ),
-            )
-            linha_extra += 1
-
         linha_acoes = tk.Frame(self.conteudo_central, bg=CORES["bg_card"])
         linha_acoes.pack(fill="x", pady=(4, 2))
 
@@ -2223,7 +2261,9 @@ class SistemaCadastrosApp:
                 pady=6,
                 cursor="hand2",
             ).pack(side="right")
-            
+
+        self.canvas_central.yview_moveto(0)
+        
     def concluir_cadastro_atual(self):
         cadastro = self.obter_pendente_selecionado()
         if not cadastro:
@@ -2280,34 +2320,47 @@ class SistemaCadastrosApp:
                 "Erro",
                 f"Falha ao concluir cadastro.\n\nDetalhes: {e}"
             )
-                        
+                            
     def mostrar_info_motorista(self):
         cadastro = self.cadastro_em_exibicao
         if not cadastro:
+            messagebox.showwarning("Aviso", "Nenhum cadastro selecionado.")
             return
 
         janela = tk.Toplevel(self.root)
         janela.title("Mais informações do motorista")
-        janela.geometry("620x420")
-        janela.minsize(560, 360)
         janela.configure(bg=CORES["bg_card"])
         janela.transient(self.root)
         janela.grab_set()
 
-        topo = tk.Frame(janela, bg=CORES["bg_top"], padx=16, pady=14)
-        topo.pack(fill="x")
+        largura = 760
+        altura = 420
+
+        self.root.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() // 2) - (largura // 2)
+        y = self.root.winfo_rooty() + (self.root.winfo_height() // 2) - (altura // 2)
+
+        janela.geometry(f"{largura}x{altura}+{x}+{y}")
+        janela.minsize(700, 380)
+
+        frame = tk.Frame(
+            janela,
+            bg=CORES["bg_card"],
+            padx=14,
+            pady=14,
+        )
+        frame.pack(fill="both", expand=True)
 
         tk.Label(
-            topo,
-            text=cadastro.get("motorista_nome", "Motorista"),
-            bg=CORES["bg_top"],
+            frame,
+            text="Informações complementares do motorista",
+            bg=CORES["bg_card"],
             fg=CORES["texto"],
-            font=("Segoe UI", 13, "bold"),
-        ).pack(anchor="w")
+            font=("Segoe UI", 11, "bold"),
+        ).pack(anchor="w", pady=(0, 10))
 
-        corpo = tk.Frame(janela, bg=CORES["bg_card"], padx=14, pady=14)
+        corpo = tk.Frame(frame, bg=CORES["bg_card"])
         corpo.pack(fill="both", expand=True)
-
         corpo.grid_columnconfigure(0, weight=1)
         corpo.grid_columnconfigure(1, weight=1)
 
@@ -2318,6 +2371,7 @@ class SistemaCadastrosApp:
             0,
             0,
             botao_copiar=True,
+            destaque=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
                 limpar_documento(cadastro.get("motorista_cpf", "")),
@@ -2328,14 +2382,28 @@ class SistemaCadastrosApp:
         self.criar_campo_formulario(
             corpo,
             "RG",
-            limpar_documento(cadastro.get("motorista_rg", "N/A")),
+            cadastro.get("motorista_rg", "N/A"),
             0,
             1,
             botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
-                limpar_documento(cadastro.get("motorista_rg", "")),
+                cadastro.get("motorista_rg", ""),
                 "RG",
+            ),
+        )
+
+        self.criar_campo_formulario(
+            corpo,
+            "Validade RG",
+            formatar_data_br(cadastro.get("motorista_validade_rg", "N/A")),
+            1,
+            0,
+            botao_copiar=True,
+            callback_copiar=lambda: copiar_texto(
+                self.root,
+                formatar_data_br(cadastro.get("motorista_validade_rg", "")),
+                "Validade RG",
             ),
         )
 
@@ -2344,7 +2412,7 @@ class SistemaCadastrosApp:
             "CNH",
             cadastro.get("motorista_cnh", "N/A"),
             1,
-            0,
+            1,
             botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
@@ -2357,8 +2425,8 @@ class SistemaCadastrosApp:
             corpo,
             "Validade CNH",
             formatar_data_br(cadastro.get("motorista_validade_cnh", "N/A")),
-            1,
-            1,
+            2,
+            0,
             botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
@@ -2372,7 +2440,7 @@ class SistemaCadastrosApp:
             "Data de nascimento",
             formatar_data_br(cadastro.get("motorista_data_nascimento", "N/A")),
             2,
-            0,
+            1,
             botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
@@ -2385,8 +2453,9 @@ class SistemaCadastrosApp:
             corpo,
             "Telefone",
             cadastro.get("motorista_telefone", "N/A"),
-            2,
-            1,
+            3,
+            0,
+            columnspan=2,
             botao_copiar=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
@@ -2395,24 +2464,24 @@ class SistemaCadastrosApp:
             ),
         )
 
-        rodape = tk.Frame(janela, bg=CORES["bg_card"], padx=16, pady=16)
-        rodape.pack(fill="x")
+        linha_botoes = tk.Frame(frame, bg=CORES["bg_card"])
+        linha_botoes.pack(fill="x", pady=(10, 0))
 
         tk.Button(
-            rodape,
+            linha_botoes,
             text="Fechar",
             command=janela.destroy,
-            bg=CORES["azul"],
-            fg="white",
-            activebackground="#2563eb",
+            bg="#243041",
+            fg=CORES["texto"],
+            activebackground="#334155",
             activeforeground="white",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 8, "bold"),
             relief="flat",
-            padx=14,
-            pady=9,
+            padx=10,
+            pady=4,
             cursor="hand2",
         ).pack(side="right")
-
+        
     # =========================================================
     # SELEÇÃO / FICHA
     # =========================================================
