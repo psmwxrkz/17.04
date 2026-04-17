@@ -52,18 +52,15 @@ class CadastroService:
             return True
 
         try:
-            print("[DB] Iniciando PostgresDatabase()...")
             self.db = PostgresDatabase()
             self.db_ok = True
             self.erro_db = None
-            print("[DB] Conexão com banco estabelecida com sucesso.")
             return True
 
         except Exception as e:
             self.db = None
             self.db_ok = False
             self.erro_db = repr(e)
-            print(f"[DB] Falha ao conectar no banco: {self.erro_db}")
             return False
 
     # ------------------------------------------------------------------
@@ -78,8 +75,6 @@ class CadastroService:
 
         if visitantes is None:
             visitantes, _ = self.client.buscar_visitantes()
-
-        print(f"[CadastroService] Total de registros recebidos: {len(visitantes)}")
 
         self._limpar_conclusoes_recentes_expiradas()
 
@@ -116,7 +111,7 @@ class CadastroService:
 
             em_janela_protecao = self._registro_em_janela_de_conclusao(chave_origem, registro_id)
 
-            # Só preserva "realizado" localmente se NÃO houver reabertura / nova entrada
+            # preserva realizado local apenas se o cadastro não foi claramente reaberto
             if (em_janela_protecao or conclusao_local) and cadastro.get("status") != "pendente":
                 cadastro["status"] = "realizado"
                 cadastro["concluido_em"] = (
@@ -153,24 +148,17 @@ class CadastroService:
                     pass
 
             if status == "realizado":
-                conclusao_local_final = None
-                if self.db_ok and self.db is not None:
-                    try:
-                        conclusao_local_final = self.db.obter_conclusao_local(chave_origem, registro_id)
-                    except Exception:
-                        conclusao_local_final = None
-
                 cadastro["concluido_em"] = (
                     cadastro.get("concluido_em")
-                    or conclusao_local_final
+                    or conclusao_local
                 )
 
-                if self.db_ok and self.db is not None:
-                    try:
-                        if self.db.ficha_expirada(chave_origem, registro_id, horas=24):
-                            continue
-                    except Exception:
-                        pass
+                # evita nova ida ao banco só para checar expiração
+                concluido_ref = self._parse_datetime_generico(cadastro.get("concluido_em"))
+                if concluido_ref:
+                    limite = datetime.now() - timedelta(hours=24)
+                    if concluido_ref <= limite:
+                        continue
 
                 novos_realizados.append(cadastro)
             else:
@@ -200,12 +188,6 @@ class CadastroService:
                 self.db.remover_expiradas(horas=24)
             except Exception:
                 pass
-
-        print(
-            f"[CadastroService] Pendentes finais: {len(self.cadastros_pendentes)} | "
-            f"Realizados finais: {len(self.cadastros_realizados)} | "
-            f"Novos: {len(novos_cadastros)}"
-        )
 
         return novos_cadastros
 
@@ -361,37 +343,29 @@ class CadastroService:
         concluido_no_sistema=False,
         status_balgate="",
     ):
-        """
-        Regras:
-        1) Se status_balgate / conclusão local já indicam realizado,
-        só considera reabertura se houver evidência real de evento mais novo.
-        2) status_base sozinho (ex.: "presente") não pode derrubar uma ficha
-        recém-concluída para pendente.
-        3) Só trata como nova entrada quando houver:
-        - data_evento mais nova que concluido_em
-        OU
-        - ainda não existir nenhuma conclusão anterior e o status base for pendente.
-        """
         data_evento_dt = self._parse_datetime_generico(data_evento)
         concluido_em_dt = self._parse_datetime_generico(concluido_em)
         status_balgate_norm = str(status_balgate or "").strip().lower().replace(" ", "_")
+        status_base_norm = str(status_base or "").strip().lower().replace(" ", "_")
 
-        possui_conclusao = bool(concluido_no_sistema or concluido_em_dt or status_balgate_norm == "realizado")
+        # nova entrada explícita sempre volta para pendente
+        if status_base_norm == "nova_entrada":
+            return True
 
-        # Se já existe conclusão registrada, só reabre se o evento atual for
-        # comprovadamente mais novo que a conclusão.
+        # se já existe conclusão registrada, só reabre com evidência real de evento mais novo
+        possui_conclusao = bool(
+            concluido_no_sistema
+            or concluido_em_dt
+            or status_balgate_norm == "realizado"
+        )
+
         if possui_conclusao:
             if data_evento_dt and concluido_em_dt:
                 return data_evento_dt > concluido_em_dt
-
-            # Sem prova de evento mais novo, não reabre
             return False
 
-        # Se nunca houve conclusão registrada, status pendente/presente continua pendente
-        if self._status_indica_pendente(status_base):
-            return True
-
-        return False
+        # se nunca houve conclusão, os status pendentes continuam pendentes
+        return self._status_indica_pendente(status_base_norm)
 
     def _obter_primeiro_individuo(self, consumo):
         individuos = consumo.get("individuos") or []
@@ -489,19 +463,6 @@ class CadastroService:
             concluido_em=(concluido_em_origem or conclusao_local),
             concluido_no_sistema=(concluido_no_sistema or bool(conclusao_local) or em_janela_protecao),
             status_balgate=(status_balgate or ("realizado" if conclusao_local or em_janela_protecao else "")),
-        )
-
-        if (
-            str(status_balgate or "").strip().lower().replace(" ", "_") == "realizado"
-            and concluido_em_origem
-        ):
-            foi_reaberto = False
-            
-        print(
-            f"[REABERTURA VISITANTE] id={registro_id} | "
-            f"status_base={status_base} | status_balgate={status_balgate} | "
-            f"concluido_em_origem={concluido_em_origem} | conclusao_local={conclusao_local} | "
-            f"em_janela={em_janela_protecao} | foi_reaberto={foi_reaberto}"
         )
 
         if foi_reaberto:
@@ -609,13 +570,6 @@ class CadastroService:
             concluido_em=(concluido_em_origem or conclusao_local),
             concluido_no_sistema=(concluido_no_sistema or bool(conclusao_local) or em_janela_protecao),
             status_balgate=(status_balgate or ("realizado" if conclusao_local or em_janela_protecao else "")),
-        )
-
-        print(
-            f"[REABERTURA CONSUMO] id={registro_id} | "
-            f"status_base={status_base} | status_balgate={status_balgate} | "
-            f"concluido_em_origem={concluido_em_origem} | conclusao_local={conclusao_local} | "
-            f"em_janela={em_janela_protecao} | foi_reaberto={foi_reaberto}"
         )
 
         empresa_motorista = (
