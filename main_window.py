@@ -163,6 +163,7 @@ class SistemaCadastrosApp:
         self.ultima_ficha_alerta = None
         self.lembrete_popup_after_id = None
         self.intervalo_lembrete_popup_ms = 36500
+        self.primeira_carga_concluida = False
 
         self.status_inicializacao = tk.StringVar(value="Aguardando conexão com banco...")
 
@@ -755,6 +756,23 @@ class SistemaCadastrosApp:
                 if (origem_atual, id_atual) not in todos_ids:
                     self.limpar_painel_central()
 
+            # ---------------------------------------------------------
+            # NÃO ALERTAR NA PRIMEIRA CARGA DO SISTEMA
+            # ---------------------------------------------------------
+            if not self.primeira_carga_concluida:
+                self.primeira_carga_concluida = True
+
+                if self.service.cadastros_pendentes:
+                    self.piscar_barra_tarefas()
+                else:
+                    self.parar_alerta_ultima_ficha()
+                    self.parar_alertas_se_nao_houver_pendencias()
+
+                return
+
+            # ---------------------------------------------------------
+            # ALERTAS APENAS PARA NOVAS FICHAS COM O SISTEMA JÁ ABERTO
+            # ---------------------------------------------------------
             if exibir_alertas:
                 novos_ids = self.ids_pendentes_atuais - ids_anteriores
 
@@ -800,7 +818,7 @@ class SistemaCadastrosApp:
 
         except Exception as e:
             print("Erro em sincronizar_com_firebase:", repr(e))
-
+            
     # =========================================================
     # BANDEJA / JANELA
     # =========================================================
@@ -1522,6 +1540,12 @@ class SistemaCadastrosApp:
         self.var_busca.set("")
         self.entry_busca.focus_set()
 
+    def abrir_site_baltech(self, event=None):
+        try:
+            webbrowser.open("https://baltech.com.br")
+        except Exception as e:
+            print("Erro ao abrir site da BALTECH:", e)
+            
     def formatar_origem(self, origem):
         mapa = {
             "visitantes": "VISITANTE",
@@ -1822,16 +1846,18 @@ class SistemaCadastrosApp:
         )
         lbl_empresa.pack(fill="x", pady=(1, 0))
 
-        lbl_smartcard = tk.Label(
-            corpo,
-            text=f"💳 SmartCard: {smartcard}",
-            bg=cor_normal,
-            fg="#93c5fd" if origem == "realizado" else CORES["texto_secundario"],
-            font=("Segoe UI", 8, "bold" if origem == "realizado" else "normal"),
-            anchor="w",
-            cursor="hand2",
-        )
-        lbl_smartcard.pack(fill="x", pady=(2, 0))
+        lbl_smartcard = None
+        if origem == "realizado":
+            lbl_smartcard = tk.Label(
+                corpo,
+                text=f"💳 SmartCard: {smartcard}",
+                bg=cor_normal,
+                fg="#93c5fd",
+                font=("Segoe UI", 8, "bold"),
+                anchor="w",
+                cursor="hand2",
+            )
+            lbl_smartcard.pack(fill="x", pady=(2, 0))
 
         rodape = tk.Frame(card, bg=cor_normal)
         rodape.pack(fill="x", pady=(8, 0))
@@ -1861,7 +1887,8 @@ class SistemaCadastrosApp:
                 lbl_placa.configure(bg=bg)
                 lbl_motorista.configure(bg=bg)
                 lbl_empresa.configure(bg=bg)
-                lbl_smartcard.configure(bg=bg)
+                if lbl_smartcard is not None:
+                    lbl_smartcard.configure(bg=bg)
             except Exception:
                 pass
 
@@ -1885,8 +1912,10 @@ class SistemaCadastrosApp:
             lbl_status,
             lbl_motorista,
             lbl_empresa,
-            lbl_smartcard,
         ]
+
+        if lbl_smartcard is not None:
+            widgets_clicaveis.append(lbl_smartcard)
 
         for widget in widgets_clicaveis:
             widget.bind("<Button-1>", clique_card)
@@ -1967,6 +1996,7 @@ class SistemaCadastrosApp:
             1,
             0,
             botao_copiar=True,
+            destaque=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
                 cadastro.get("motorista_cnh", ""),
@@ -2096,21 +2126,6 @@ class SistemaCadastrosApp:
                 formatar_data_br(concluido_em),
                 4,
                 1,
-            )
-        else:
-            self.criar_campo_formulario(
-                grade_dados,
-                "SmartCard atual",
-                cadastro.get("smartcard", "Não informado") or "Não informado",
-                4,
-                1,
-                destaque=True,
-                botao_copiar=True,
-                callback_copiar=lambda: copiar_texto(
-                    self.root,
-                    cadastro.get("smartcard", "Não informado") or "Não informado",
-                    "SmartCard atual",
-                ),
             )
             
         linha_extra = 5
@@ -2269,52 +2284,60 @@ class SistemaCadastrosApp:
         if not cadastro:
             messagebox.showwarning("Aviso", "Selecione um cadastro pendente.")
             return
- 
+
         smartcard = self.var_smartcard.get().strip().upper()
- 
+
         if not self.smartcard_valido(smartcard):
             messagebox.showwarning(
                 "SmartCard inválido",
                 "Informe um SmartCard válido com 10 caracteres.",
             )
             return
- 
+
         try:
             origem = cadastro.get("origem")
             registro_id = cadastro.get("id")
- 
+
+            # conclui localmente + firebase
             self.service.concluir_cadastro(cadastro, smartcard)
- 
+
             # atualiza a interface imediatamente com os dados locais
             self.filtrar_listas()
             self.exibir_detalhes(cadastro, origem="realizado")
- 
+
             self.parar_alerta_ultima_ficha()
             self.parar_alertas_se_nao_houver_pendencias()
- 
-            # tenta sincronizar com o Firebase sem bloquear o fluxo local
+
+            # tenta sincronizar novamente, mas sem transformar isso em erro fatal
             try:
                 self.sincronizar_com_firebase(exibir_alertas=False)
             except Exception as e:
                 print("Aviso ao sincronizar após conclusão:", e)
- 
+
+            # checagem leve: se localmente já foi movida para realizados,
+            # considera sucesso e evita falso erro por timing de atualização
             ainda_pendente = any(
                 c.get("origem") == origem and c.get("id") == registro_id
                 for c in self.service.cadastros_pendentes
             )
- 
+
             ja_realizado = any(
                 c.get("origem") == origem and c.get("id") == registro_id
                 for c in self.service.cadastros_realizados
             )
- 
-            if ainda_pendente or not ja_realizado:
+
+            if ainda_pendente:
                 raise RuntimeError(
-                    "A ficha foi concluída localmente, mas não foi possível confirmar a atualização da lista."
+                    "A ficha ainda aparece como pendente após a conclusão."
                 )
- 
+
+            if not ja_realizado:
+                print(
+                    "[AVISO] Ficha concluída, mas a confirmação visual da lista ainda não apareceu imediatamente."
+                )
+
             messagebox.showinfo("Sucesso", "Cadastro concluído com sucesso.")
- 
+
         except Exception as e:
             messagebox.showerror(
                 "Erro",
@@ -2351,12 +2374,14 @@ class SistemaCadastrosApp:
         )
         frame.pack(fill="both", expand=True)
 
+        nome_motorista = cadastro.get("motorista_nome", "Motorista não informado")
+
         tk.Label(
             frame,
-            text="Informações complementares do motorista",
+            text=nome_motorista,
             bg=CORES["bg_card"],
             fg=CORES["texto"],
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 12, "bold"),
         ).pack(anchor="w", pady=(0, 10))
 
         corpo = tk.Frame(frame, bg=CORES["bg_card"])
@@ -2371,7 +2396,6 @@ class SistemaCadastrosApp:
             0,
             0,
             botao_copiar=True,
-            destaque=True,
             callback_copiar=lambda: copiar_texto(
                 self.root,
                 limpar_documento(cadastro.get("motorista_cpf", "")),
